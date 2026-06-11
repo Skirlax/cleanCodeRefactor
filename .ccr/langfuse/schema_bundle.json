@@ -1,0 +1,459 @@
+{
+  "schemas": {
+    "unit": {
+      "$defs": {
+        "UnitKind": {
+          "enum": [
+            "class",
+            "function",
+            "method"
+          ],
+          "title": "UnitKind",
+          "type": "string"
+        }
+      },
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "language": {
+          "default": "python",
+          "title": "Language",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/UnitKind"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "qualified_name": {
+          "title": "Qualified Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "end_line": {
+          "minimum": 1,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "start_byte": {
+          "minimum": 0,
+          "title": "Start Byte",
+          "type": "integer"
+        },
+        "end_byte": {
+          "minimum": 0,
+          "title": "End Byte",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit_id",
+        "kind",
+        "name",
+        "qualified_name",
+        "path",
+        "start_line",
+        "end_line",
+        "start_byte",
+        "end_byte",
+        "text",
+        "sha256"
+      ],
+      "title": "CodeUnit",
+      "type": "object"
+    },
+    "retrieval": {
+      "$defs": {
+        "RetrievalIdea": {
+          "properties": {
+            "code_example": {
+              "minLength": 1,
+              "title": "Code Example",
+              "type": "string"
+            },
+            "why": {
+              "minLength": 1,
+              "title": "Why",
+              "type": "string"
+            },
+            "how": {
+              "minLength": 1,
+              "title": "How",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code_example",
+            "why",
+            "how"
+          ],
+          "title": "RetrievalIdea",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "ideas": {
+          "items": {
+            "$ref": "#/$defs/RetrievalIdea"
+          },
+          "title": "Ideas",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit_id"
+      ],
+      "title": "RetrievalResult",
+      "type": "object"
+    },
+    "refactor": {
+      "$defs": {
+        "RefactorOutcome": {
+          "enum": [
+            "changed",
+            "unchanged",
+            "skipped",
+            "failed"
+          ],
+          "title": "RefactorOutcome",
+          "type": "string"
+        }
+      },
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RefactorOutcome"
+        },
+        "changed_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed Files",
+          "type": "array"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit_id",
+        "outcome",
+        "message"
+      ],
+      "title": "RefactorResult",
+      "type": "object"
+    },
+    "summary": {
+      "$defs": {
+        "AcceptedRefactor": {
+          "properties": {
+            "unit": {
+              "title": "Unit",
+              "type": "string"
+            },
+            "files_changed": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Files Changed",
+              "type": "array"
+            },
+            "renames": {
+              "items": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "title": "Renames",
+              "type": "array"
+            },
+            "signature_changes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Signature Changes",
+              "type": "array"
+            },
+            "integration_points": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Integration Points",
+              "type": "array"
+            },
+            "constraints_to_preserve": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Constraints To Preserve",
+              "type": "array"
+            },
+            "verification": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Verification",
+              "type": "array"
+            },
+            "behavior_changes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Behavior Changes",
+              "type": "array"
+            }
+          },
+          "required": [
+            "unit"
+          ],
+          "title": "AcceptedRefactor",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "accepted_refactors": {
+          "items": {
+            "$ref": "#/$defs/AcceptedRefactor"
+          },
+          "title": "Accepted Refactors",
+          "type": "array"
+        }
+      },
+      "title": "CumulativeSummary",
+      "type": "object"
+    },
+    "run_summary": {
+      "properties": {
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "original_path": {
+          "title": "Original Path",
+          "type": "string"
+        },
+        "copied_workspace": {
+          "title": "Copied Workspace",
+          "type": "string"
+        },
+        "applied_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Applied Changes",
+          "type": "array"
+        },
+        "skipped_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skipped Changes",
+          "type": "array"
+        },
+        "examples_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples Used",
+          "type": "array"
+        },
+        "verification_results": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Results",
+          "type": "array"
+        },
+        "apply_command": {
+          "title": "Apply Command",
+          "type": "string"
+        },
+        "warning": {
+          "title": "Warning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "original_path",
+        "copied_workspace",
+        "apply_command",
+        "warning"
+      ],
+      "title": "RunSummary",
+      "type": "object"
+    },
+    "judge": {
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit_id",
+        "accepted",
+        "summary"
+      ],
+      "title": "JudgeResult",
+      "type": "object"
+    },
+    "test_assessment": {
+      "$defs": {
+        "TestRecommendation": {
+          "properties": {
+            "name": {
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "behavior": {
+              "minLength": 1,
+              "title": "Behavior",
+              "type": "string"
+            },
+            "suggested_location": {
+              "minLength": 1,
+              "title": "Suggested Location",
+              "type": "string"
+            },
+            "reason": {
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "behavior",
+            "suggested_location",
+            "reason"
+          ],
+          "title": "TestRecommendation",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "adequate": {
+          "title": "Adequate",
+          "type": "boolean"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "recommendations": {
+          "items": {
+            "$ref": "#/$defs/TestRecommendation"
+          },
+          "title": "Recommendations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit_id",
+        "adequate",
+        "reason"
+      ],
+      "title": "TestAssessment",
+      "type": "object"
+    },
+    "test_write": {
+      "properties": {
+        "unit_id": {
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "changed_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed Files",
+          "type": "array"
+        },
+        "test_commands": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Test Commands",
+          "type": "array"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit_id",
+        "message"
+      ],
+      "title": "TestWriteResult",
+      "type": "object"
+    }
+  },
+  "note": "JSON schemas are synced to Langfuse-facing inspection artifacts only. The source of truth for schemas is the Pydantic models in code. Prompts are not stored in code; they are fetched from Langfuse at runtime."
+}
