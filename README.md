@@ -1,22 +1,24 @@
 # Clean Code Refactor
 
-Clean Code Refactor, or CCR, is a command-line orchestrator for improving Python codebases without handing your working tree directly to an AI agent.
+Clean Code Refactor, or CCR, is a command-line tool for running Codex-backed refactors on Python projects without letting the agent edit the original working tree directly.
 
-It copies a project into an isolated run workspace, finds refactorable units, asks Codex to add or check tests, performs clean-code refactors, runs verification, commits only accepted changes inside the copy, and gives you an inspection dashboard before anything is applied back to the original project.
+A run starts by copying the project into an isolated workspace. CCR then selects refactoring units, checks or adds tests, gives Codex a limited scope, verifies the result, commits accepted unit changes in the copy, and writes dashboards and diffs for review. The original repository changes only after you run `ccr apply --yes`.
 
-The short version: CCR turns "please clean up this code" into a repeatable, reviewable workflow.
+CCR treats cleanup as a series of smaller attempts, each with logs, verification, and a patch you can inspect before applying.
 
 ## Why CCR Exists
 
-LLMs are good at local refactoring. Production code is less forgiving.
+LLMs are useful for local refactoring. Refactors can still go wrong in small ways that are easy to miss. A method rename can leak across a boundary, a helper can change behavior, or a test can pass while an edge case is lost.
 
-CCR sits between those two facts. It gives the model focused units of code, relevant clean-code references, test and verification gates, structured output schemas, a judge pass when requested, and a copied workspace where mistakes can be rolled back. You get the speed of AI-assisted refactoring while keeping the control loop that experienced engineers expect: inspect the diff, inspect the logs, run the checks, then apply.
+CCR adds a control loop around the model. The copied workspace gives every attempt a rollback point. Unit selection keeps the scope readable. Verification commands catch obvious breakage. Optional judge mode gives passing diffs one more review pass. The dashboard keeps the diff, logs, and decisions in one place.
+
+This gives AI-assisted refactoring an audit trail and enough context to decide whether a change belongs in the real project.
 
 ## What It Does
 
 - Copies the target project into `/tmp/ccr/runs/<run-id>/workspace` by default.
 - Extracts Python refactoring units as classes/functions, whole files, packages, or model-budgeted clusters.
-- Ranks units by a maintenance-value score so gnarlier code can be handled first.
+- Ranks units with a maintenance-value score so the more useful cleanup targets can be handled first.
 - Uses Langfuse-backed runtime prompts for retrieval, test audit, test writing, refactoring, and judging.
 - Runs Codex CLI in scoped sandboxes for read-only analysis and workspace-write edits.
 - Can generate characterization tests before refactoring when coverage is missing.
@@ -27,7 +29,9 @@ CCR sits between those two facts. It gives the model focused units of code, rele
 
 ## Current Scope
 
-CCR is currently focused on Python projects. The CLI already exposes provider and language boundaries, but the implemented MVP path is Python extraction plus the `codex` and `heuristic` providers. OpenAI API-key provider support is reserved behind the provider interface but not implemented yet.
+CCR is currently focused on Python projects. The CLI already has provider and language boundaries, but the implemented MVP path is Python extraction together with the `codex` and `heuristic` providers.
+
+Support for an OpenAI API-key provider is reserved behind the provider interface, but it is not implemented yet.
 
 ## Installation
 
@@ -64,7 +68,7 @@ LANGFUSE_SECRET_KEY=sk-lf-...
 OPENAI_API_KEY=...
 ```
 
-Runtime prompts are stored in Langfuse. The bundled YAML file is a backup and bootstrap source:
+Runtime prompts are stored in Langfuse. The bundled YAML file serves as a backup and bootstrap source:
 
 ```bash
 ccr langfuse sync-prompts --input ccr/langfuse_related/prompt_backups.yaml
@@ -79,7 +83,7 @@ First, preview what CCR would work on:
 ccr plan /path/to/python/project
 ```
 
-Then run a small, reviewable refactor:
+Then run a small refactor that is easy to review:
 
 ```bash
 ccr refactor /path/to/python/project \
@@ -110,7 +114,7 @@ Analyze a project and print extracted units as JSON:
 ccr analyze /path/to/project --unit-mode code
 ```
 
-Print the exact units selected by a refactor command without creating a run:
+Print the exact units that would be selected by a refactor command, without creating a run:
 
 ```bash
 ccr refactor /path/to/project --refactor-intensity structural --max-units 5 --print-units
@@ -150,7 +154,7 @@ ccr verify /tmp/ccr/runs/run-YYYYMMDDTHHMMSSZ/workspace --command "python -m pyt
 2. **Select**: It extracts units and orders them by source order or value score.
 3. **Protect**: It checks whether tests are adequate and can ask Codex to add characterization tests first.
 4. **Retrieve**: It gathers clean-code guidance and example context for the current unit.
-5. **Refactor**: Codex edits the copied workspace, never the original project.
+5. **Refactor**: Codex edits only the copied workspace.
 6. **Verify**: CCR runs configured checks and rolls back failed attempts.
 7. **Judge**: Optional judge mode reviews passing diffs and can retry rejected attempts.
 8. **Commit**: Accepted changes are committed unit by unit in the copied workspace.
@@ -183,7 +187,7 @@ ccr refactor /path/to/project \
 
 CCR supports several unit modes:
 
-- `code`: class/function units, the default conservative mode.
+- `code`: class/function units, which is the default conservative mode.
 - `file`: whole Python files.
 - `package`: direct files in Python packages, with file fallback.
 - `cluster`: model-budgeted file groups for broader structural refactors.
@@ -241,6 +245,6 @@ python -m ccr.cli langfuse check-prompts
 
 ## Project Philosophy
 
-CCR is intentionally careful. It does not try to make refactoring feel magical; it tries to make it observable. The interesting part is not that an agent can edit code. The interesting part is that each edit has a bounded unit, a reason, a verification trail, a rollback point, and a human-readable diff before it becomes part of your real project.
+CCR is intentionally conservative. Each change is tied to a bounded unit, a reason, a verification trail, a rollback point, and a diff.
 
-That is the kind of automation you can invite into a serious codebase.
+The hard part of agentic refactoring is often the review: what changed, why it changed, and whether the behavior still matches the original system. CCR keeps that information visible enough that applying the patch feels closer to a normal code-review decision.
