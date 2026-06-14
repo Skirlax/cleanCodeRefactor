@@ -53,18 +53,88 @@ pip install -e ".[dev]"
 
 For normal Codex-backed refactoring, make sure the `codex` CLI is installed and available on `PATH`.
 
+### Install Langfuse Locally
+
+CCR uses Langfuse for runtime prompts and Codex call traces. For local development, the simplest setup is the Langfuse v3 Docker Compose stack. It runs the Langfuse web app, worker, Postgres, ClickHouse, Redis, and MinIO on your machine.
+
+Clone the Langfuse repository into a separate local directory:
+
+```bash
+git clone https://github.com/langfuse/langfuse.git /tmp/ccr-langfuse-selfhost
+cd /tmp/ccr-langfuse-selfhost
+```
+
+The CCR local setup normally uses port `3001`, so change the `langfuse-web` port in `docker-compose.yml` from:
+
+```yaml
+- 3000:3000
+```
+
+to:
+
+```yaml
+- 3001:3000
+```
+
+If you keep Langfuse on port `3000`, use `http://localhost:3000` everywhere below instead.
+
+Create a Langfuse `.env` file in `/tmp/ccr-langfuse-selfhost`. These commands generate the required local secrets and set up one CCR project through Langfuse headless initialization.
+
+```bash
+NEXTAUTH_SECRET="$(openssl rand -base64 32)"
+SALT="$(openssl rand -base64 32)"
+ENCRYPTION_KEY="$(openssl rand -hex 32)"
+
+cat > .env <<EOF
+NEXTAUTH_URL=http://localhost:3001
+NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+SALT=${SALT}
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+POSTGRES_PASSWORD=ccr_langfuse_postgres
+DATABASE_URL=postgresql://postgres:ccr_langfuse_postgres@postgres:5432/postgres
+CLICKHOUSE_PASSWORD=ccr_langfuse_clickhouse
+REDIS_AUTH=ccr_langfuse_redis
+MINIO_ROOT_PASSWORD=ccr_langfuse_minio
+LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=ccr_langfuse_minio
+LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=ccr_langfuse_minio
+LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY=ccr_langfuse_minio
+
+LANGFUSE_INIT_ORG_ID=ccr
+LANGFUSE_INIT_ORG_NAME=Clean Code Refactor
+LANGFUSE_INIT_PROJECT_ID=ccr-local
+LANGFUSE_INIT_PROJECT_NAME=CCR Local
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-ccr-local
+LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-ccr-local
+LANGFUSE_INIT_USER_EMAIL=admin@ccr.local
+LANGFUSE_INIT_USER_NAME=CCR Admin
+LANGFUSE_INIT_USER_PASSWORD=ccr-local-admin-password
+EOF
+```
+
+Start Langfuse:
+
+```bash
+docker compose up -d
+docker compose logs -f langfuse-web
+```
+
+After the web container is ready, open `http://localhost:3001`. The `LANGFUSE_INIT_*` values create the local organization, project, user, and API keys on first startup.
+
+CCR can either use the same Langfuse init values directly, or the shorter `LANGFUSE_*` variables from the next section. The shorter form is easier to keep in the project `.env`.
+
 CCR also reads `.env`, `.env.local`, or a file pointed to by `CCR_ENV_FILE`. Start from the example:
 
 ```bash
 cp .env.example .env
 ```
 
-Then fill in the values you need:
+Then fill in the values you need. For the local Langfuse setup above, the Langfuse values are:
 
 ```env
 LANGFUSE_BASE_URL=http://localhost:3001
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-ccr-local
+LANGFUSE_SECRET_KEY=sk-lf-ccr-local
 OPENAI_API_KEY=...
 ```
 
