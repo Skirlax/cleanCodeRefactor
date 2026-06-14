@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "clean-code-refactor"
 version = "0.1.0"
 description = "A copied-workspace clean-code refactoring orchestrator."
-readme = "PLAN.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
