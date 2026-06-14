@@ -7,7 +7,7 @@ from typing import Protocol
 from ccr.knowledge.loaders import ReferenceContext
 from ccr.knowledge.retrieval import choose_retrieval_ideas
 from ccr.schemas.judge import JudgeResult
-from ccr.schemas.refactor import RefactorOutcome, RefactorResult
+from ccr.schemas.refactor import RefactorIntensity, RefactorOutcome, RefactorResult
 from ccr.schemas.retrieval import RetrievalResult
 from ccr.schemas.summary import CumulativeSummary
 from ccr.schemas.tests import TestAssessment, TestRecommendation, TestWriteResult
@@ -28,7 +28,8 @@ class ModelProvider(Protocol):
         retrieval: RetrievalResult,
         summary: CumulativeSummary,
         workspace: Path,
-        instructions: str,
+        instructions: str | None,
+        refactor_intensity: RefactorIntensity,
     ) -> RefactorResult: ...
 
     def judge(
@@ -36,8 +37,10 @@ class ModelProvider(Protocol):
         *,
         unit: CodeUnit,
         diff: str,
+        refactor_result: RefactorResult,
         summary: CumulativeSummary,
         workspace: Path,
+        refactor_intensity: RefactorIntensity,
     ) -> JudgeResult: ...
 
     def assess_tests(
@@ -104,7 +107,8 @@ class HeuristicProvider:
         retrieval: RetrievalResult,
         summary: CumulativeSummary,
         workspace: Path,
-        instructions: str,
+        instructions: str | None,
+        refactor_intensity: RefactorIntensity,
     ) -> RefactorResult:
         replacement = _known_python_replacement(unit)
         if replacement is None:
@@ -138,8 +142,10 @@ class HeuristicProvider:
         *,
         unit: CodeUnit,
         diff: str,
+        refactor_result: RefactorResult,
         summary: CumulativeSummary,
         workspace: Path,
+        refactor_intensity: RefactorIntensity,
     ) -> JudgeResult:
         return JudgeResult(
             unit_id=unit.unit_id,

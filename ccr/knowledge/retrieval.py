@@ -63,8 +63,8 @@ def _why_for_unit(unit: CodeUnit) -> str:
 def _how_for_unit(unit: CodeUnit, document: ReferenceDocument) -> str:
     return (
         f"Use the {document.purpose} at {document.path} as a style reference. Extract named "
-        "helpers, prefer direct conditionals over nested branching, and keep public signatures "
-        "stable unless integration points are updated together."
+        "helpers, prefer direct conditionals over nested branching, and update repository-local "
+        "integration points together when cleaner names or structure require it."
     )
 
 

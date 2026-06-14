@@ -85,6 +85,7 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
     status = str(state.get("status") or "unknown")
     title = f"CCR Run Dashboard - {state.get('run_id') or Path(snapshot['run_dir']).name}"
     started_at = _run_started_at(events) or snapshot.get("generated_at") or ""
+    elapsed = _elapsed_snapshot(events, status, str(snapshot["generated_at"]))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -363,7 +364,7 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
     }}
   </style>
 </head>
-<body data-running="{_h(str(running).lower())}" data-started-at="{_h(str(started_at))}">
+<body data-running="{_h(str(running).lower())}" data-started-at="{_h(str(started_at))}" data-elapsed-seconds="{_h(str(elapsed["seconds"]))}" data-elapsed-recorded-at="{_h(str(snapshot["generated_at"]))}" data-active-started-at="{_h(str(elapsed["active_started_at"] or ""))}">
   <header>
     <h1>{_h(title)}</h1>
     <div class="subhead">{_h(str(snapshot["run_dir"]))}</div>
@@ -377,7 +378,7 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
       <span class="pill">Model: {_h(str(state.get("model") or "config default"))}</span>
       <span class="pill">Reasoning: {_h(str(state.get("reasoning_effort") or "config default"))}</span>
       <span class="pill">Units: {_h(str(state.get("units_done", 0)))} / {_h(str(state.get("units_total", 0)))}</span>
-      <span class="pill">Elapsed: <span data-elapsed-counter>{_h(_elapsed_text(str(started_at), str(snapshot["generated_at"])))}</span></span>
+      <span class="pill">Elapsed: <span data-elapsed-counter>{_h(str(elapsed["text"]))}</span></span>
       <span class="pill">Updated: {_time_tag(str(snapshot["generated_at"]))}</span>
       {_refresh_note(running)}
     </div>
@@ -400,6 +401,8 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
       const refreshMs = 5000;
       const running = document.body.dataset.running === "true";
       const startedAt = document.body.dataset.startedAt;
+      const elapsedSeconds = Number(document.body.dataset.elapsedSeconds || "NaN");
+      const elapsedRecordedAt = document.body.dataset.elapsedRecordedAt;
       const detailStorageKey = `ccr-dashboard-details:${{location.pathname}}`;
 
       function formatLocalMinute(value) {{
@@ -409,11 +412,9 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
         return `${{date.getFullYear()}}-${{pad(date.getMonth() + 1)}}-${{pad(date.getDate())}} ${{pad(date.getHours())}}:${{pad(date.getMinutes())}}`;
       }}
 
-      function elapsedText(startValue, endValue = new Date().toISOString()) {{
-        const start = new Date(startValue);
-        const end = new Date(endValue);
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "unknown";
-        const totalMinutes = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
+      function formatElapsedSeconds(totalSeconds) {{
+        if (!Number.isFinite(totalSeconds)) return "unknown";
+        const totalMinutes = Math.max(0, Math.floor(totalSeconds / 60));
         const days = Math.floor(totalMinutes / 1440);
         const hours = Math.floor((totalMinutes % 1440) / 60);
         const minutes = totalMinutes % 60;
@@ -422,6 +423,13 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
         if (hours || days) parts.push(`${{hours}}h`);
         parts.push(`${{minutes}}m`);
         return parts.join(" ");
+      }}
+
+      function elapsedText(startValue, endValue = new Date().toISOString()) {{
+        const start = new Date(startValue);
+        const end = new Date(endValue);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "unknown";
+        return formatElapsedSeconds((end.getTime() - start.getTime()) / 1000);
       }}
 
       function openDetailsIds() {{
@@ -453,12 +461,21 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
       }});
 
       const elapsedCounter = document.querySelector("[data-elapsed-counter]");
-      if (elapsedCounter && startedAt) {{
+      if (elapsedCounter && Number.isFinite(elapsedSeconds)) {{
         const updateElapsed = () => {{
-          elapsedCounter.textContent = elapsedText(startedAt);
+          let currentSeconds = elapsedSeconds;
+          if (running && elapsedRecordedAt) {{
+            const recordedAt = new Date(elapsedRecordedAt);
+            if (!Number.isNaN(recordedAt.getTime())) {{
+              currentSeconds += Math.max(0, (Date.now() - recordedAt.getTime()) / 1000);
+            }}
+          }}
+          elapsedCounter.textContent = formatElapsedSeconds(currentSeconds);
         }};
         updateElapsed();
         setInterval(updateElapsed, 1000);
+      }} else if (elapsedCounter && startedAt) {{
+        elapsedCounter.textContent = elapsedText(startedAt);
       }}
 
       restoreDetails();
@@ -490,6 +507,7 @@ def _render_diff_page(snapshot: dict[str, Any]) -> str:
     status = str(state.get("status") or "unknown")
     title = f"CCR Diff Viewer - {state.get('run_id') or run_dir.name}"
     started_at = _run_started_at(events) or snapshot.get("generated_at") or ""
+    elapsed = _elapsed_snapshot(events, status, str(snapshot["generated_at"]))
     unit_diffs = _build_unit_diffs(run_dir, state, ledger)
     return f"""<!doctype html>
 <html lang="en">
@@ -727,7 +745,7 @@ def _render_diff_page(snapshot: dict[str, Any]) -> str:
     }}
   </style>
 </head>
-<body data-running="{_h(str(running).lower())}" data-started-at="{_h(str(started_at))}">
+<body data-running="{_h(str(running).lower())}" data-started-at="{_h(str(started_at))}" data-elapsed-seconds="{_h(str(elapsed["seconds"]))}" data-elapsed-recorded-at="{_h(str(snapshot["generated_at"]))}" data-active-started-at="{_h(str(elapsed["active_started_at"] or ""))}">
   <header>
     <h1>{_h(title)}</h1>
     <div class="subhead">{_h(str(run_dir))}</div>
@@ -740,7 +758,7 @@ def _render_diff_page(snapshot: dict[str, Any]) -> str:
       <span class="pill">Provider: {_h(str(state.get("provider") or "unknown"))}</span>
       <span class="pill">Model: {_h(str(state.get("model") or "config default"))}</span>
       <span class="pill">Units: {_h(str(state.get("units_done", 0)))} / {_h(str(state.get("units_total", 0)))}</span>
-      <span class="pill">Elapsed: <span data-elapsed-counter>{_h(_elapsed_text(str(started_at), str(snapshot["generated_at"])))}</span></span>
+      <span class="pill">Elapsed: <span data-elapsed-counter>{_h(str(elapsed["text"]))}</span></span>
       <span class="pill">Updated: {_time_tag(str(snapshot["generated_at"]))}</span>
     </div>
   </header>
@@ -764,7 +782,11 @@ def _render_diff_page(snapshot: dict[str, Any]) -> str:
         const start = new Date(startValue);
         const end = new Date(endValue);
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "unknown";
-        const totalMinutes = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
+        return formatElapsedSeconds((end.getTime() - start.getTime()) / 1000);
+      }}
+      function formatElapsedSeconds(totalSeconds) {{
+        if (!Number.isFinite(totalSeconds)) return "unknown";
+        const totalMinutes = Math.max(0, Math.floor(totalSeconds / 60));
         const days = Math.floor(totalMinutes / 1440);
         const hours = Math.floor((totalMinutes % 1440) / 60);
         const minutes = totalMinutes % 60;
@@ -778,11 +800,25 @@ def _render_diff_page(snapshot: dict[str, Any]) -> str:
         element.textContent = formatLocalMinute(element.dateTime || element.getAttribute("datetime"));
       }});
       const startedAt = document.body.dataset.startedAt;
+      const running = document.body.dataset.running === "true";
+      const elapsedSeconds = Number(document.body.dataset.elapsedSeconds || "NaN");
+      const elapsedRecordedAt = document.body.dataset.elapsedRecordedAt;
       const elapsedCounter = document.querySelector("[data-elapsed-counter]");
-      if (elapsedCounter && startedAt) {{
-        const updateElapsed = () => elapsedCounter.textContent = elapsedText(startedAt);
+      if (elapsedCounter && Number.isFinite(elapsedSeconds)) {{
+        const updateElapsed = () => {{
+          let currentSeconds = elapsedSeconds;
+          if (running && elapsedRecordedAt) {{
+            const recordedAt = new Date(elapsedRecordedAt);
+            if (!Number.isNaN(recordedAt.getTime())) {{
+              currentSeconds += Math.max(0, (Date.now() - recordedAt.getTime()) / 1000);
+            }}
+          }}
+          elapsedCounter.textContent = formatElapsedSeconds(currentSeconds);
+        }};
         updateElapsed();
         setInterval(updateElapsed, 1000);
+      }} else if (elapsedCounter && startedAt) {{
+        elapsedCounter.textContent = elapsedText(startedAt);
       }}
       document.querySelectorAll("[data-file-selector]").forEach((select) => {{
         const unitId = select.dataset.fileSelector;
@@ -820,14 +856,16 @@ def _render_unit_diff(unit: dict[str, Any]) -> str:
     main_files = unit["main_files"]
     other_files = unit["other_files"]
     unit_dom_id = _dom_id(str(unit["unit_id"]))
+    selectable = (unit["is_package"] or unit["is_cluster"]) and len(main_files) > 1
     selector = ""
-    if unit["is_package"] and len(main_files) > 1:
+    if selectable:
+        selector_label = "Cluster file" if unit["is_cluster"] else "Package file"
         options = "".join(
             f'<option value="{_h(file["path"])}">{_h(file["path"])}</option>' for file in main_files
         )
         selector = f"""
           <div class="file-select-row">
-            <label for="select-{_h(unit_dom_id)}">Package file</label>
+            <label for="select-{_h(unit_dom_id)}">{_h(selector_label)}</label>
             <select id="select-{_h(unit_dom_id)}" data-file-selector="{_h(unit_dom_id)}">{options}</select>
           </div>
 """
@@ -835,7 +873,7 @@ def _render_unit_diff(unit: dict[str, Any]) -> str:
         _render_file_diff(
             file,
             unit_dom_id=unit_dom_id,
-            selectable=unit["is_package"] and len(main_files) > 1,
+            selectable=selectable,
             initially_visible=index == 0,
         )
         for index, file in enumerate(main_files)
@@ -952,7 +990,14 @@ def _build_unit_diffs(
             continue
         unit_id = str(entry.get("unit_id") or "")
         unit_path, _, unit_name = unit_id.partition("::")
-        main_paths = _main_paths_for_unit(workspace, commit, unit_path, unit_name, changed_files)
+        main_paths = _main_paths_for_unit(
+            workspace,
+            commit,
+            unit_path,
+            unit_name,
+            changed_files,
+            entry,
+        )
         main_files = [
             _file_snapshot_diff(workspace, parent, commit, path, unit_id=unit_id)
             for path in main_paths
@@ -967,6 +1012,7 @@ def _build_unit_diffs(
                 "unit_id": unit_id,
                 "title": _unit_title(unit_id),
                 "commit": commit,
+                "is_cluster": _is_cluster_unit(unit_name),
                 "is_package": _is_package_unit(unit_path, unit_name),
                 "main_files": [file for file in main_files if file is not None],
                 "other_files": [file for file in other_files if file is not None],
@@ -994,7 +1040,21 @@ def _main_paths_for_unit(
     unit_path: str,
     unit_name: str,
     changed_files: list[str],
+    entry: dict[str, Any],
 ) -> list[str]:
+    if _is_cluster_unit(unit_name):
+        owned_paths = [
+            str(path)
+            for path in entry.get("owned_paths") or entry.get("member_paths") or []
+            if str(path)
+        ]
+        owned_path_set = set(owned_paths)
+        paths = [
+            path
+            for path in changed_files
+            if path in owned_path_set and _is_supported_source_path(path)
+        ]
+        return paths or [path for path in owned_paths if _is_supported_source_path(path)]
     if _is_package_unit(unit_path, unit_name):
         prefix = "" if unit_path == "." else unit_path.rstrip("/") + "/"
         paths = [
@@ -1183,6 +1243,8 @@ def _unit_title(unit_id: str) -> str:
     path, _, name = unit_id.partition("::")
     if name == "package":
         return f"Package: {path}"
+    if name == "cluster":
+        return f"Cluster: {path}"
     if name == "<file>":
         return f"File: {path}"
     return name or unit_id
@@ -1192,9 +1254,13 @@ def _is_package_unit(unit_path: str, unit_name: str) -> bool:
     return unit_name == "package" and not unit_path.endswith((".py", ".js", ".ts", ".java"))
 
 
+def _is_cluster_unit(unit_name: str) -> bool:
+    return unit_name == "cluster"
+
+
 def _is_code_unit(unit_id: str) -> bool:
     _, _, unit_name = unit_id.partition("::")
-    return unit_name not in {"", "<file>", "package"}
+    return unit_name not in {"", "<file>", "package", "cluster"}
 
 
 def _is_supported_source_path(path: str) -> bool:
@@ -1557,15 +1623,69 @@ def _run_started_at(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _elapsed_snapshot(
+    events: list[dict[str, Any]],
+    status: str,
+    generated_at: str,
+) -> dict[str, object]:
+    start_events = {"run_started", "run_resumed"}
+    stop_events = {"run_interrupted", "run_completed", "final_verification_failed"}
+    generated = _parse_dashboard_time(generated_at)
+    active_start: datetime | None = None
+    active_started_at: str | None = None
+    total_seconds = 0.0
+    saw_active_event = False
+
+    for event in events:
+        event_type = str(event.get("event") or "")
+        timestamp = _parse_dashboard_time(str(event.get("timestamp") or ""))
+        if timestamp is None:
+            continue
+        if event_type in start_events:
+            if active_start is not None:
+                total_seconds += max(0.0, (timestamp - active_start).total_seconds())
+            active_start = timestamp
+            saw_active_event = True
+            continue
+        if event_type in stop_events and active_start is not None:
+            total_seconds += max(0.0, (timestamp - active_start).total_seconds())
+            active_start = None
+
+    if active_start is not None and generated is not None:
+        total_seconds += max(0.0, (generated - active_start).total_seconds())
+        if status == "running":
+            active_started_at = active_start.isoformat()
+
+    if saw_active_event:
+        seconds = max(0, int(total_seconds))
+        return {
+            "seconds": seconds,
+            "active_started_at": active_started_at,
+            "text": _elapsed_seconds_text(seconds),
+        }
+
+    started_at = _run_started_at(events)
+    if started_at and generated_at:
+        return {
+            "seconds": None,
+            "active_started_at": None,
+            "text": _elapsed_text(started_at, generated_at),
+        }
+    return {"seconds": None, "active_started_at": None, "text": "unknown"}
+
+
 def _elapsed_text(started_at: str, ended_at: str) -> str:
     if not started_at:
         return "unknown"
-    try:
-        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(ended_at.replace("Z", "+00:00"))
-    except ValueError:
+    start = _parse_dashboard_time(started_at)
+    end = _parse_dashboard_time(ended_at)
+    if start is None or end is None:
         return "unknown"
-    total_minutes = max(0, int((end - start).total_seconds() // 60))
+    return _elapsed_seconds_text(max(0, int((end - start).total_seconds())))
+
+
+def _elapsed_seconds_text(total_seconds: int) -> str:
+    total_minutes = max(0, total_seconds // 60)
     days, remainder = divmod(total_minutes, 24 * 60)
     hours, minutes = divmod(remainder, 60)
     parts = []
@@ -1575,6 +1695,15 @@ def _elapsed_text(started_at: str, ended_at: str) -> str:
         parts.append(f"{hours}h")
     parts.append(f"{minutes}m")
     return " ".join(parts)
+
+
+def _parse_dashboard_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _json_text(value: Any) -> str:

@@ -149,14 +149,16 @@ class GitRepo:
             for line in staged.stdout.splitlines()
             if line.strip() and not _is_generated_path(line.strip())
         )
-        for line in self.status_short().splitlines():
-            if line.startswith("?? "):
-                names.update(self._expand_untracked(line[3:].strip()))
+        names.update(self._untracked_files())
         return sorted(names)
 
     def diff(self, *revisions: str) -> str:
         args = ["diff", "--binary", *revisions, "--", ".", *GENERATED_EXCLUDE_PATHS]
-        return self.run(*args).stdout
+        tracked_diff = self.run(*args).stdout
+        if revisions:
+            return tracked_diff
+        untracked_diffs = [self._untracked_file_diff(name) for name in self._untracked_files()]
+        return "\n".join(diff for diff in [tracked_diff, *untracked_diffs] if diff)
 
     def show_stat(self, *revisions: str) -> str:
         args = ["diff", "--stat", *revisions, "--", ".", *GENERATED_EXCLUDE_PATHS]
@@ -196,6 +198,27 @@ class GitRepo:
                 if child.is_file() and not _is_generated_path(str(child.relative_to(self.path)))
             ]
         return [] if _is_generated_path(name) else [name]
+
+    def _untracked_files(self) -> list[str]:
+        names: set[str] = set()
+        for line in self.status_short().splitlines():
+            if line.startswith("?? "):
+                names.update(self._expand_untracked(line[3:].strip()))
+        return sorted(names)
+
+    def _untracked_file_diff(self, name: str) -> str:
+        result = self.run(
+            "diff",
+            "--no-index",
+            "--binary",
+            "--",
+            "/dev/null",
+            name,
+            check=False,
+        )
+        if result.returncode not in {0, 1}:
+            result.check_returncode()
+        return result.stdout
 
 
 def _is_generated_path(name: str) -> bool:

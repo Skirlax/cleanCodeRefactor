@@ -5,9 +5,13 @@ import sys
 from pathlib import Path
 
 from ccr.langfuse_related.prompts import (
+    DEFAULT_PROMPT_BACKUP_FILE,
+    REQUIRED_PROMPTS,
     LangfusePromptStore,
     PromptName,
     check_required_prompts,
+    seed_prompts_from_file,
+    sync_prompt_backups_to_langfuse,
 )
 from ccr.langfuse_related.sync import (
     SCHEMA_MODELS,
@@ -51,6 +55,8 @@ def test_required_prompt_check_uses_langfuse_prompt_store() -> None:
     assert statuses == {
         "ccr-retrieval": "ok",
         "ccr-refactor": "ok",
+        "ccr-refactor-instructions-conservative": "ok",
+        "ccr-refactor-instructions-structural": "ok",
         "ccr-judge": "ok",
         "ccr-summarize": "ok",
         "ccr-test-audit": "ok",
@@ -76,6 +82,53 @@ def test_schema_sync_creates_langfuse_inspection_artifacts() -> None:
     assert all(prompt["type"] == "text" for prompt in client.created_prompts)
     assert all(prompt["labels"] == ["schema-inspection"] for prompt in client.created_prompts)
     assert all(prompt["config"]["source_of_truth"] == "code" for prompt in client.created_prompts)
+
+
+def test_seed_prompts_from_yaml_creates_langfuse_versions(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompts.yaml"
+    prompt_file.write_text(
+        "\n".join(
+            [
+                "prompts:",
+                "  - name: ccr-example",
+                "    type: text",
+                "    labels:",
+                "      - production",
+                "    config:",
+                "      backup_source: tests",
+                "    commit_message: Add example prompt",
+                "    prompt: |",
+                "      Example prompt",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    client = FakeLangfuseClient()
+
+    seeded = seed_prompts_from_file(prompt_file, client=client)
+
+    assert seeded == ["ccr-example"]
+    assert client.created_prompts == [
+        {
+            "name": "ccr-example",
+            "type": "text",
+            "prompt": "Example prompt\n",
+            "labels": ["production"],
+            "config": {"backup_source": "tests"},
+            "commit_message": "Add example prompt",
+        }
+    ]
+
+
+def test_bundled_prompt_backup_covers_required_langfuse_prompts() -> None:
+    client = FakeLangfuseClient()
+
+    synced = sync_prompt_backups_to_langfuse(client=client)
+
+    assert set(synced) == {prompt.value for prompt in REQUIRED_PROMPTS}
+    assert DEFAULT_PROMPT_BACKUP_FILE.name == "prompt_backups.yaml"
+    assert all(prompt["labels"] == ["production"] for prompt in client.created_prompts)
 
 
 def test_internal_langfuse_related_package_does_not_shadow_langfuse_sdk() -> None:

@@ -1,0 +1,12 @@
+{
+  "models": {
+    "gpt-5.5": {
+      "context_window_tokens": 1050000,
+      "max_output_tokens": 128000,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.5",
+      "verified_at": "2026-06-14T00:00:00+00:00"
+    }
+  },
+  "schema_version": 1,
+  "updated_at": "2026-06-14T00:00:00+00:00"
+}

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class UnitKind(StrEnum):
     CLASS = "class"
+    CLUSTER = "cluster"
     FILE = "file"
     FUNCTION = "function"
     METHOD = "method"
@@ -26,6 +27,15 @@ class CodeUnit(BaseModel):
     end_byte: int = Field(ge=0)
     text: str
     sha256: str
+    member_paths: list[str] = Field(default_factory=list)
+    owned_paths: list[str] = Field(default_factory=list)
+    context_paths: list[str] = Field(default_factory=list)
+    estimated_tokens: int | None = None
+    source_token_budget: int | None = None
+    model_context_window_tokens: int | None = None
+    model_max_output_tokens: int | None = None
+    response_reserve_tokens: int | None = None
+    budget_notes: list[str] = Field(default_factory=list)
 
     @property
     def location(self) -> str:

@@ -5,8 +5,10 @@
         "UnitKind": {
           "enum": [
             "class",
+            "file",
             "function",
-            "method"
+            "method",
+            "package"
           ],
           "title": "UnitKind",
           "type": "string"
@@ -132,6 +134,47 @@
     },
     "refactor": {
       "$defs": {
+        "IntegrationUpdate": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "description": {
+              "title": "Description",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "description"
+          ],
+          "title": "IntegrationUpdate",
+          "type": "object"
+        },
+        "MovedLogicRecord": {
+          "properties": {
+            "from_symbol": {
+              "title": "From Symbol",
+              "type": "string"
+            },
+            "to_symbol": {
+              "title": "To Symbol",
+              "type": "string"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_symbol",
+            "to_symbol",
+            "reason"
+          ],
+          "title": "MovedLogicRecord",
+          "type": "object"
+        },
         "RefactorOutcome": {
           "enum": [
             "changed",
@@ -141,6 +184,34 @@
           ],
           "title": "RefactorOutcome",
           "type": "string"
+        },
+        "RenameRecord": {
+          "properties": {
+            "old_name": {
+              "title": "Old Name",
+              "type": "string"
+            },
+            "new_name": {
+              "title": "New Name",
+              "type": "string"
+            },
+            "kind": {
+              "title": "Kind",
+              "type": "string"
+            },
+            "location": {
+              "default": "",
+              "title": "Location",
+              "type": "string"
+            }
+          },
+          "required": [
+            "old_name",
+            "new_name",
+            "kind"
+          ],
+          "title": "RenameRecord",
+          "type": "object"
         }
       },
       "properties": {
@@ -167,6 +238,41 @@
             "type": "string"
           },
           "title": "Assumptions",
+          "type": "array"
+        },
+        "renames": {
+          "items": {
+            "$ref": "#/$defs/RenameRecord"
+          },
+          "title": "Renames",
+          "type": "array"
+        },
+        "signature_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Signature Changes",
+          "type": "array"
+        },
+        "moved_logic": {
+          "items": {
+            "$ref": "#/$defs/MovedLogicRecord"
+          },
+          "title": "Moved Logic",
+          "type": "array"
+        },
+        "integration_points_updated": {
+          "items": {
+            "$ref": "#/$defs/IntegrationUpdate"
+          },
+          "title": "Integration Points Updated",
+          "type": "array"
+        },
+        "behavior_changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Behavior Changes",
           "type": "array"
         }
       },
@@ -195,10 +301,7 @@
             },
             "renames": {
               "items": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
+                "$ref": "#/$defs/RenameRecord"
               },
               "title": "Renames",
               "type": "array"
@@ -210,11 +313,25 @@
               "title": "Signature Changes",
               "type": "array"
             },
+            "moved_logic": {
+              "items": {
+                "$ref": "#/$defs/MovedLogicRecord"
+              },
+              "title": "Moved Logic",
+              "type": "array"
+            },
             "integration_points": {
               "items": {
                 "type": "string"
               },
               "title": "Integration Points",
+              "type": "array"
+            },
+            "integration_points_updated": {
+              "items": {
+                "$ref": "#/$defs/IntegrationUpdate"
+              },
+              "title": "Integration Points Updated",
               "type": "array"
             },
             "constraints_to_preserve": {
@@ -243,6 +360,75 @@
             "unit"
           ],
           "title": "AcceptedRefactor",
+          "type": "object"
+        },
+        "IntegrationUpdate": {
+          "properties": {
+            "path": {
+              "title": "Path",
+              "type": "string"
+            },
+            "description": {
+              "title": "Description",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "description"
+          ],
+          "title": "IntegrationUpdate",
+          "type": "object"
+        },
+        "MovedLogicRecord": {
+          "properties": {
+            "from_symbol": {
+              "title": "From Symbol",
+              "type": "string"
+            },
+            "to_symbol": {
+              "title": "To Symbol",
+              "type": "string"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_symbol",
+            "to_symbol",
+            "reason"
+          ],
+          "title": "MovedLogicRecord",
+          "type": "object"
+        },
+        "RenameRecord": {
+          "properties": {
+            "old_name": {
+              "title": "Old Name",
+              "type": "string"
+            },
+            "new_name": {
+              "title": "New Name",
+              "type": "string"
+            },
+            "kind": {
+              "title": "Kind",
+              "type": "string"
+            },
+            "location": {
+              "default": "",
+              "title": "Location",
+              "type": "string"
+            }
+          },
+          "required": [
+            "old_name",
+            "new_name",
+            "kind"
+          ],
+          "title": "RenameRecord",
           "type": "object"
         }
       },
@@ -455,5 +641,5 @@
       "type": "object"
     }
   },
-  "note": "JSON schemas are synced to Langfuse-facing inspection artifacts only. The source of truth for schemas is the Pydantic models in code. Prompts are not stored in code; they are fetched from Langfuse at runtime."
+  "note": "JSON schemas are synced to Langfuse-facing inspection artifacts only. The source of truth for schemas is the Pydantic models in code. Runtime prompts are fetched from Langfuse; backup prompt copies live in YAML for recovery and version seeding."
 }

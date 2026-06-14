@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from ccr.knowledge.loaders import ReferenceContext
 from ccr.langfuse_related.prompts import LangfusePromptStore, PromptName
 from ccr.schemas.judge import JudgeResult
-from ccr.schemas.refactor import RefactorResult
+from ccr.schemas.refactor import RefactorIntensity, RefactorResult
 from ccr.schemas.retrieval import RetrievalResult
 from ccr.schemas.summary import CumulativeSummary
 from ccr.schemas.tests import TestAssessment, TestWriteResult
@@ -51,7 +51,7 @@ class CodexCliProvider:
             [
                 self.prompt_store.get_text(PromptName.RETRIEVAL),
                 "## Current Unit",
-                unit.model_dump_json(indent=2),
+                _unit_json_for_prompt(unit),
                 "## Clean-Code Guides",
                 _documents_json(references.guides),
                 "## Example Codebase Files",
@@ -73,19 +73,25 @@ class CodexCliProvider:
         retrieval: RetrievalResult,
         summary: CumulativeSummary,
         workspace: Path,
-        instructions: str,
+        instructions: str | None,
+        refactor_intensity: RefactorIntensity,
     ) -> RefactorResult:
+        effective_instructions = instructions or self.prompt_store.get_text(
+            _refactor_instruction_prompt_name(refactor_intensity)
+        )
         prompt = "\n\n".join(
             [
                 self.prompt_store.get_text(PromptName.REFACTOR),
                 "## Current Unit",
-                unit.model_dump_json(indent=2),
+                _unit_json_for_prompt(unit),
                 "## Retrieval JSON",
                 retrieval.model_dump_json(indent=2),
                 "## Cumulative Refactor Summary",
                 summary.model_dump_json(indent=2),
+                "## Refactor Intensity",
+                refactor_intensity.value,
                 "## Refactor Instructions",
-                instructions,
+                effective_instructions,
             ]
         )
         return self._run_codex(
@@ -101,14 +107,20 @@ class CodexCliProvider:
         *,
         unit: CodeUnit,
         diff: str,
+        refactor_result: RefactorResult,
         summary: CumulativeSummary,
         workspace: Path,
+        refactor_intensity: RefactorIntensity,
     ) -> JudgeResult:
         prompt = "\n\n".join(
             [
                 self.prompt_store.get_text(PromptName.JUDGE),
                 "## Unit",
-                unit.model_dump_json(indent=2),
+                _unit_json_for_prompt(unit),
+                "## Refactor Intensity",
+                refactor_intensity.value,
+                "## Refactor Result",
+                refactor_result.model_dump_json(indent=2),
                 "## Diff",
                 diff,
                 "## Cumulative Refactor Summary",
@@ -136,7 +148,7 @@ class CodexCliProvider:
             [
                 self.prompt_store.get_text(PromptName.TEST_AUDIT),
                 "## Current Unit",
-                unit.model_dump_json(indent=2),
+                _unit_json_for_prompt(unit),
                 "## Cumulative Refactor Summary",
                 summary.model_dump_json(indent=2),
                 "## Verification Commands",
@@ -169,7 +181,7 @@ class CodexCliProvider:
             [
                 self.prompt_store.get_text(PromptName.TEST_WRITE),
                 "## Current Unit",
-                unit.model_dump_json(indent=2),
+                _unit_json_for_prompt(unit),
                 "## Test Assessment",
                 assessment.model_dump_json(indent=2),
                 "## Cumulative Refactor Summary",
@@ -342,6 +354,31 @@ class CodexCliProvider:
         }
         _write_langfuse_codex_call(record, self.run_dir)
         _write_local_codex_call(self.run_dir, record)
+
+
+def _refactor_instruction_prompt_name(refactor_intensity: RefactorIntensity) -> PromptName:
+    if refactor_intensity == RefactorIntensity.STRUCTURAL:
+        return PromptName.REFACTOR_INSTRUCTIONS_STRUCTURAL
+    return PromptName.REFACTOR_INSTRUCTIONS_CONSERVATIVE
+
+
+def _unit_json_for_prompt(unit: CodeUnit) -> str:
+    payload = unit.model_dump(mode="json")
+    member_paths = payload.get("member_paths") or []
+    owned_paths = payload.get("owned_paths") or []
+    if not member_paths or member_paths == owned_paths:
+        payload.pop("member_paths", None)
+        return json.dumps(payload, indent=2)
+
+    return "\n".join(
+        [
+            (
+                "Member paths identify the exact source files or source regions that define "
+                "this unit; they may be more granular than the editable file paths."
+            ),
+            json.dumps(payload, indent=2),
+        ]
+    )
 
 
 def _documents_json(documents: list[object]) -> str:

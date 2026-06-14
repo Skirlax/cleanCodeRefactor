@@ -34,8 +34,8 @@ def build_schema_bundle() -> dict[str, object]:
         "schemas": {name: model.model_json_schema() for name, model in SCHEMA_MODELS.items()},
         "note": (
             "JSON schemas are synced to Langfuse-facing inspection artifacts only. The source of "
-            "truth for schemas is the Pydantic models in code. Prompts are not stored in code; "
-            "they are fetched from Langfuse at runtime."
+            "truth for schemas is the Pydantic models in code. Runtime prompts are fetched from "
+            "Langfuse; backup prompt copies live in YAML for recovery and version seeding."
         ),
     }
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ccr.env import load_environment_files
 from ccr.knowledge.references import DEFAULT_REFERENCES_ROOT
+from ccr.schemas.refactor import RefactorIntensity
 from ccr.schemas.summary import RunSummary
 from ccr.workflow.run import RefactorRunConfig, run_refactor
 
@@ -17,16 +18,13 @@ def build_debug_config() -> RefactorRunConfig:
     reasoning_effort = "xhigh"
     run_root = Path("/home/vvlcek/Documents/ccr/debug-runs")
     references_root = DEFAULT_REFERENCES_ROOT
-    max_units = 5
+    max_units = None
     include_methods = False
     verification_commands: list[str] = []
     characterization_commands = []
     test_generation_enabled = True
     judge = True
-    instructions = (
-        "Refactor the current unit toward cleaner, intention-revealing Python while preserving "
-        "observable behavior and public integration points."
-    )
+    refactor_intensity = RefactorIntensity.STRUCTURAL
 
     return RefactorRunConfig(
         project=project,
@@ -42,7 +40,7 @@ def build_debug_config() -> RefactorRunConfig:
         characterization_commands=characterization_commands,
         test_generation_enabled=test_generation_enabled,
         judge=judge,
-        instructions=instructions,
+        refactor_intensity=refactor_intensity,
     )
 
 

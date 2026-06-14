@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from ccr.snapshots.git import GitRepo
-from ccr.workflow.dashboard import RunEventLog, write_run_dashboard
+from ccr.workflow.dashboard import RunEventLog, _elapsed_snapshot, write_run_dashboard
 
 
 def test_dashboard_renders_run_artifacts(tmp_path: Path) -> None:
@@ -108,6 +108,39 @@ def test_dashboard_renders_run_artifacts(tmp_path: Path) -> None:
     assert "CCR Diff Viewer - run-1" in diff_html
     assert 'href="dashboard.html"' in diff_html
     assert "No accepted unit commits are available yet." in diff_html
+
+
+def test_elapsed_snapshot_stops_when_run_is_interrupted() -> None:
+    elapsed = _elapsed_snapshot(
+        [
+            {"event": "run_started", "timestamp": "2026-06-10T10:00:00Z"},
+            {"event": "run_interrupted", "timestamp": "2026-06-10T10:07:30Z"},
+        ],
+        "interrupted",
+        "2026-06-11T10:00:00Z",
+    )
+
+    assert elapsed == {
+        "seconds": 450,
+        "active_started_at": None,
+        "text": "7m",
+    }
+
+
+def test_elapsed_snapshot_resumes_after_interruption() -> None:
+    elapsed = _elapsed_snapshot(
+        [
+            {"event": "run_started", "timestamp": "2026-06-10T10:00:00Z"},
+            {"event": "run_interrupted", "timestamp": "2026-06-10T10:10:00Z"},
+            {"event": "run_resumed", "timestamp": "2026-06-11T08:00:00Z"},
+        ],
+        "running",
+        "2026-06-11T08:05:00Z",
+    )
+
+    assert elapsed["seconds"] == 900
+    assert elapsed["active_started_at"] == "2026-06-11T08:00:00+00:00"
+    assert elapsed["text"] == "15m"
 
 
 def test_diff_page_renders_code_unit_and_integration_changes(tmp_path: Path) -> None:
@@ -274,6 +307,59 @@ def test_diff_page_renders_package_file_selector_and_other_changes(tmp_path: Pat
     assert 'data-file-path="pkg/beta.py" hidden' in diff_html
     assert "Other changes in this commit" in diff_html
     assert "outside.py" in diff_html
+
+
+def test_diff_page_renders_cluster_owned_files_and_other_changes(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-cluster"
+    workspace = run_dir / "workspace"
+    package = workspace / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "models.py").write_text("class User:\n    pass\n", encoding="utf-8")
+    (package / "service.py").write_text("def load_user():\n    return 'old'\n", encoding="utf-8")
+    (workspace / "integration.py").write_text("VALUE = 'old'\n", encoding="utf-8")
+    repo = GitRepo(workspace)
+    repo.ensure_baseline()
+
+    (package / "models.py").write_text("class UserRecord:\n    pass\n", encoding="utf-8")
+    (package / "service.py").write_text(
+        "def load_user():\n    return 'new'\n",
+        encoding="utf-8",
+    )
+    (workspace / "integration.py").write_text("VALUE = 'new'\n", encoding="utf-8")
+    repo.add_all(force=True)
+    repo.commit("ccr refactor cluster")
+    commit = repo.head()
+
+    _write_state(run_dir, workspace, run_id="run-cluster", units_done=1, units_total=1)
+    _append_jsonl(
+        run_dir / "events.jsonl",
+        {"timestamp": "2026-06-11T10:00:00Z", "event": "run_started"},
+    )
+    _append_jsonl(
+        run_dir / "ledger.jsonl",
+        {
+            "unit_id": "cluster/01-pkg-service::cluster",
+            "outcome": "accepted",
+            "changed_files": ["pkg/models.py", "pkg/service.py", "integration.py"],
+            "owned_paths": ["pkg/models.py", "pkg/service.py"],
+            "context_paths": ["integration.py"],
+            "checks_run": ["pytest"],
+            "commit": commit,
+            "message": "Refactored cluster.",
+        },
+    )
+
+    write_run_dashboard(run_dir)
+
+    diff_html = (run_dir / "diffs.html").read_text(encoding="utf-8")
+    assert "Cluster: cluster/01-pkg-service" in diff_html
+    assert "Cluster file" in diff_html
+    assert '<option value="pkg/models.py">pkg/models.py</option>' in diff_html
+    assert '<option value="pkg/service.py">pkg/service.py</option>' in diff_html
+    assert '<option value="integration.py"' not in diff_html
+    assert "Other changes in this commit" in diff_html
+    assert "integration.py" in diff_html
 
 
 def _append_jsonl(path: Path, payload: dict[str, object]) -> None:

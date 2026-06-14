@@ -64,19 +64,30 @@ def extract_units(
     include_methods: bool = False,
     excluded_dirs: set[str] | None = None,
     unit_mode: str = "code",
+    model: str | None = None,
+    target_unit_count: int = 5,
 ) -> list[CodeUnit]:
     if language.lower() != "python":
         msg = f"Only Python extraction is implemented for the MVP, got {language!r}."
         raise ValueError(msg)
     normalized_mode = unit_mode.lower()
-    if normalized_mode not in {"code", "file", "package"}:
-        msg = f"Unknown unit mode {unit_mode!r}. Expected code, file, or package."
+    if normalized_mode not in {"code", "file", "package", "cluster"}:
+        msg = f"Unknown unit mode {unit_mode!r}. Expected code, file, package, or cluster."
         raise ValueError(msg)
 
     if normalized_mode == "file":
         return _extract_file_units(project_root, excluded_dirs=excluded_dirs)
     if normalized_mode == "package":
         return _extract_package_or_file_units(project_root, excluded_dirs=excluded_dirs)
+    if normalized_mode == "cluster":
+        from ccr.extraction.clusters import extract_cluster_units
+
+        return extract_cluster_units(
+            project_root,
+            model=model,
+            target_unit_count=target_unit_count,
+            excluded_dirs=excluded_dirs,
+        )
 
     from ccr.extraction.tree_sitter_index import PythonTreeSitterIndex
 
@@ -148,6 +159,8 @@ def _file_unit(project_root: Path, path: Path) -> CodeUnit:
         end_byte=len(text.encode("utf-8")),
         text=text,
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        member_paths=[relative_path],
+        owned_paths=[relative_path],
     )
 
 
@@ -173,4 +186,6 @@ def _package_unit(project_root: Path, package_dir: Path, files: list[Path]) -> C
         end_byte=len(text.encode("utf-8")),
         text=text,
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        member_paths=[path.relative_to(project_root).as_posix() for path in files],
+        owned_paths=[path.relative_to(project_root).as_posix() for path in files],
     )

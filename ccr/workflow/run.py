@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 from ccr.codex.provider import build_provider
 from ccr.extraction.units import extract_units
 from ccr.knowledge.loaders import load_reference_context
-from ccr.schemas.refactor import RefactorOutcome
+from ccr.schemas.judge import JudgeResult
+from ccr.schemas.refactor import RefactorIntensity, RefactorOutcome, RefactorResult
 from ccr.schemas.summary import AcceptedRefactor, CumulativeSummary, RunSummary
 from ccr.schemas.unit import CodeUnit
 from ccr.snapshots.git import GitRepo
@@ -49,6 +50,7 @@ class RefactorRunConfig(BaseModel):
     include_methods: bool = False
     unit_mode: str = "code"
     unit_sort: str = "value"
+    target_unit_count: int = Field(default=5, ge=1)
     fast_mode: bool = False
     min_unit_lines: int | None = None
     skip_low_value_units: bool = False
@@ -59,10 +61,9 @@ class RefactorRunConfig(BaseModel):
     staged_verification: bool = False
     test_generation_enabled: bool = True
     judge: bool = False
-    instructions: str = (
-        "Refactor the current unit toward cleaner, intention-revealing Python while preserving "
-        "observable behavior and public integration points."
-    )
+    judge_retries: int = Field(default=1, ge=0)
+    refactor_intensity: RefactorIntensity = RefactorIntensity.CONSERVATIVE
+    instructions: str | None = None
 
 
 def analyze_project(
@@ -72,6 +73,8 @@ def analyze_project(
     include_methods: bool = False,
     unit_mode: str = "code",
     unit_sort: str = "value",
+    model: str | None = None,
+    target_unit_count: int = 5,
     min_unit_lines: int | None = None,
     skip_low_value_units: bool = False,
     include_units: list[str] | None = None,
@@ -82,6 +85,8 @@ def analyze_project(
         language=language,
         include_methods=include_methods,
         unit_mode=unit_mode,
+        model=model,
+        target_unit_count=target_unit_count,
     )
     filtered = _filter_units(
         units,
@@ -91,6 +96,11 @@ def analyze_project(
         exclude_units=exclude_units or [],
     )
     return _sort_units(filtered, unit_sort=unit_sort)
+
+
+def preview_refactor_units(config: RefactorRunConfig) -> list[CodeUnit]:
+    units = _analyze_project_for_config(config.project.resolve(), config)
+    return units[: config.max_units] if config.max_units else units
 
 
 def run_refactor(config: RefactorRunConfig) -> RunSummary:
@@ -259,157 +269,199 @@ def _continue_refactor(config: RefactorRunConfig, run_dir: Path) -> RunSummary:
                 unit_id=unit.unit_id,
                 ideas=[_dump_model(idea) for idea in retrieval.ideas],
             )
-            before_head = repo.head()
-            state.current_stage = "refactor"
-            state.save(run_dir)
-            refactor_result = provider.refactor(
-                unit=unit,
-                retrieval=retrieval,
-                summary=summary,
-                workspace=workspace,
-                instructions=config.instructions,
-            )
-            _format_workspace(workspace, repo.changed_files())
-            changed_files = repo.changed_files()
-            state.current_stage = "verification"
-            state.save(run_dir)
-            verification = _verify_workspace(
-                workspace,
-                _merge_commands(config.verification_commands, generated_test_commands),
-                characterization_baseline,
-                staged=config.staged_verification,
-                changed_files=changed_files,
-            )
-            diff = repo.diff()
-            _record_event(
-                run_dir,
-                event_log,
-                "refactor_completed",
-                unit_id=unit.unit_id,
-                result=_dump_model(refactor_result),
-                changed_files=changed_files,
-                diff=diff,
-            )
-            if not verification.ok:
-                _rollback_workspace(repo, before_head)
-                _record_event(
-                    run_dir,
-                    event_log,
-                    "refactor_verification_failed",
-                    unit_id=unit.unit_id,
-                    changed_files=changed_files,
-                    verification=_dump_model(verification),
-                    message=_verification_failure_message(verification),
-                )
-                ledger.append(
-                    _ledger_entry(
-                        unit=unit,
-                        outcome="verification_failed",
-                        changed_files=changed_files,
-                        retrieval=retrieval,
-                        verification=verification,
-                        message=_verification_failure_message(verification),
-                    )
-                )
-                _sync_state_progress(state, ledger, repo, run_dir)
-                continue
-            if not changed_files or refactor_result.outcome in {
-                RefactorOutcome.UNCHANGED,
-                RefactorOutcome.SKIPPED,
-            }:
-                _rollback_workspace(repo, before_head)
-                _record_event(
-                    run_dir,
-                    event_log,
-                    "refactor_skipped",
-                    unit_id=unit.unit_id,
-                    outcome=refactor_result.outcome.value,
-                    message=refactor_result.message,
-                )
-                ledger.append(
-                    _ledger_entry(
-                        unit=unit,
-                        outcome=refactor_result.outcome.value,
-                        changed_files=[],
-                        retrieval=retrieval,
-                        verification=verification,
-                        message=refactor_result.message,
-                    )
-                )
-                _sync_state_progress(state, ledger, repo, run_dir)
-                continue
-            if config.judge:
-                state.current_stage = "judge"
+            judge_feedback: str | None = None
+            max_attempts = _max_refactor_attempts(config)
+            for attempt in range(1, max_attempts + 1):
+                before_head = repo.head()
+                state.current_stage = "refactor"
                 state.save(run_dir)
-                judge_result = provider.judge(
+                refactor_result = provider.refactor(
                     unit=unit,
-                    diff=diff,
+                    retrieval=retrieval,
                     summary=summary,
                     workspace=workspace,
+                    instructions=_instructions_with_judge_feedback(
+                        config.instructions,
+                        judge_feedback,
+                    ),
+                    refactor_intensity=config.refactor_intensity,
                 )
+                _format_workspace(workspace, repo.changed_files())
+                changed_files = repo.changed_files()
+                state.current_stage = "verification"
+                state.save(run_dir)
+                verification = _verify_workspace(
+                    workspace,
+                    _merge_commands(config.verification_commands, generated_test_commands),
+                    characterization_baseline,
+                    staged=config.staged_verification,
+                    changed_files=changed_files,
+                )
+                diff = repo.diff()
                 _record_event(
                     run_dir,
                     event_log,
-                    "judge_completed",
+                    "refactor_completed",
                     unit_id=unit.unit_id,
-                    result=_dump_model(judge_result),
+                    result=_dump_model(refactor_result),
+                    changed_files=changed_files,
+                    diff=diff,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
                 )
-                if not judge_result.accepted:
+                if not verification.ok:
                     _rollback_workspace(repo, before_head)
                     _record_event(
                         run_dir,
                         event_log,
-                        "judge_rejected",
+                        "refactor_verification_failed",
                         unit_id=unit.unit_id,
-                        issues=judge_result.issues,
-                        summary=judge_result.summary,
+                        changed_files=changed_files,
+                        verification=_dump_model(verification),
+                        message=_verification_failure_message(verification),
                     )
                     ledger.append(
                         _ledger_entry(
                             unit=unit,
-                            outcome="judge_rejected",
+                            outcome="verification_failed",
                             changed_files=changed_files,
                             retrieval=retrieval,
                             verification=verification,
-                            message="; ".join(judge_result.issues) or judge_result.summary,
+                            message=_verification_failure_message(verification),
                         )
                     )
                     _sync_state_progress(state, ledger, repo, run_dir)
-                    continue
+                    break
+                if not changed_files or refactor_result.outcome in {
+                    RefactorOutcome.UNCHANGED,
+                    RefactorOutcome.SKIPPED,
+                }:
+                    _rollback_workspace(repo, before_head)
+                    _record_event(
+                        run_dir,
+                        event_log,
+                        "refactor_skipped",
+                        unit_id=unit.unit_id,
+                        outcome=refactor_result.outcome.value,
+                        message=refactor_result.message,
+                    )
+                    ledger.append(
+                        _ledger_entry(
+                            unit=unit,
+                            outcome=refactor_result.outcome.value,
+                            changed_files=[],
+                            retrieval=retrieval,
+                            verification=verification,
+                            message=refactor_result.message,
+                        )
+                    )
+                    _sync_state_progress(state, ledger, repo, run_dir)
+                    break
+                if config.judge:
+                    state.current_stage = "judge"
+                    state.save(run_dir)
+                    judge_result = provider.judge(
+                        unit=unit,
+                        diff=diff,
+                        refactor_result=refactor_result,
+                        summary=summary,
+                        workspace=workspace,
+                        refactor_intensity=config.refactor_intensity,
+                    )
+                    _record_event(
+                        run_dir,
+                        event_log,
+                        "judge_completed",
+                        unit_id=unit.unit_id,
+                        result=_dump_model(judge_result),
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                    )
+                    if not judge_result.accepted:
+                        _rollback_workspace(repo, before_head)
+                        if attempt < max_attempts:
+                            judge_feedback = _judge_retry_feedback(
+                                judge_result,
+                                config.refactor_intensity,
+                            )
+                            _record_event(
+                                run_dir,
+                                event_log,
+                                "judge_retrying",
+                                unit_id=unit.unit_id,
+                                issues=judge_result.issues,
+                                summary=judge_result.summary,
+                                attempt=attempt,
+                                retries_remaining=max_attempts - attempt,
+                            )
+                            continue
+                        _record_event(
+                            run_dir,
+                            event_log,
+                            "judge_rejected",
+                            unit_id=unit.unit_id,
+                            issues=judge_result.issues,
+                            summary=judge_result.summary,
+                            attempt=attempt,
+                            max_attempts=max_attempts,
+                        )
+                        ledger.append(
+                            _ledger_entry(
+                                unit=unit,
+                                outcome="judge_rejected",
+                                changed_files=changed_files,
+                                retrieval=retrieval,
+                                verification=verification,
+                                message=(
+                                    "; ".join(judge_result.issues)
+                                    or judge_result.summary
+                                ),
+                            )
+                        )
+                        _sync_state_progress(state, ledger, repo, run_dir)
+                        break
 
-            repo.add_all(force=True)
-            repo.commit(f"ccr refactor {unit.qualified_name}")
-            commit_hash = repo.head()
-            _record_event(
-                run_dir,
-                event_log,
-                "refactor_accepted",
-                unit_id=unit.unit_id,
-                changed_files=changed_files,
-                commit=commit_hash,
-            )
-            accepted = AcceptedRefactor(
-                unit=unit.qualified_name,
-                files_changed=changed_files,
-                integration_points=[unit.path],
-                constraints_to_preserve=[
-                    "Preserve observable behavior verified by configured checks."
-                ],
-                verification=verification.descriptions(),
-            )
-            summary.accepted_refactors.append(accepted)
-            ledger.append(
-                _ledger_entry(
-                    unit=unit,
-                    outcome="accepted",
+                repo.add_all(force=True)
+                repo.commit(f"ccr refactor {unit.qualified_name}")
+                commit_hash = repo.head()
+                _record_event(
+                    run_dir,
+                    event_log,
+                    "refactor_accepted",
+                    unit_id=unit.unit_id,
                     changed_files=changed_files,
-                    retrieval=retrieval,
-                    verification=verification,
-                    message=refactor_result.message,
                     commit=commit_hash,
+                    attempt=attempt,
                 )
-            )
-            _sync_state_progress(state, ledger, repo, run_dir)
+                accepted = AcceptedRefactor(
+                    unit=unit.qualified_name,
+                    files_changed=changed_files,
+                    renames=refactor_result.renames,
+                    signature_changes=refactor_result.signature_changes,
+                    moved_logic=refactor_result.moved_logic,
+                    integration_points=_integration_point_paths(unit, refactor_result),
+                    integration_points_updated=refactor_result.integration_points_updated,
+                    constraints_to_preserve=[
+                        "Preserve observable behavior verified by configured checks."
+                    ],
+                    verification=verification.descriptions(),
+                    behavior_changes=refactor_result.behavior_changes,
+                )
+                summary.accepted_refactors.append(accepted)
+                ledger.append(
+                    _ledger_entry(
+                        unit=unit,
+                        outcome="accepted",
+                        changed_files=changed_files,
+                        retrieval=retrieval,
+                        verification=verification,
+                        message=refactor_result.message,
+                        commit=commit_hash,
+                        refactor_result=refactor_result,
+                    )
+                )
+                _sync_state_progress(state, ledger, repo, run_dir)
+                break
     except KeyboardInterrupt as exc:
         _mark_run_interrupted(
             run_dir,
@@ -502,6 +554,48 @@ def _load_run_config(run_dir: Path) -> RefactorRunConfig:
     return RefactorRunConfig.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def _max_refactor_attempts(config: RefactorRunConfig) -> int:
+    if not config.judge:
+        return 1
+    return config.judge_retries + 1
+
+
+def _judge_retry_feedback(
+    judge_result: JudgeResult,
+    refactor_intensity: RefactorIntensity,
+) -> str:
+    issues = "\n".join(f"- {issue}" for issue in judge_result.issues)
+    if not issues:
+        issues = f"- {judge_result.summary}"
+    revision_goal = (
+        "Revise the refactor to address these judge findings. In structural mode, "
+        "intentional behavior changes are allowed only when they are explicit in "
+        "behavior_changes, justified by the diff, and covered by verification or tests. "
+        "Preserve behavior that is not explicitly changed."
+        if refactor_intensity == RefactorIntensity.STRUCTURAL
+        else "Revise the refactor to address these judge findings while preserving behavior."
+    )
+    return "\n".join(
+        [
+            "The previous refactor attempt passed verification but was rejected by the judge.",
+            revision_goal,
+            issues,
+            f"Judge summary: {judge_result.summary}",
+        ]
+    )
+
+
+def _instructions_with_judge_feedback(
+    instructions: str | None,
+    judge_feedback: str | None,
+) -> str | None:
+    if judge_feedback is None:
+        return instructions
+    if instructions:
+        return "\n\n".join([instructions, judge_feedback])
+    return judge_feedback
+
+
 def _load_or_capture_characterization_baseline(
     run_dir: Path,
     workspace: Path,
@@ -532,11 +626,16 @@ def _summary_from_ledger(entries: list[LedgerEntry]) -> CumulativeSummary:
             AcceptedRefactor(
                 unit=qualified_name or entry.unit_id,
                 files_changed=entry.changed_files,
-                integration_points=[path] if path else [],
+                renames=entry.renames,
+                signature_changes=entry.signature_changes,
+                moved_logic=entry.moved_logic,
+                integration_points=_ledger_integration_point_paths(path, entry),
+                integration_points_updated=entry.integration_points_updated,
                 constraints_to_preserve=[
                     "Preserve observable behavior verified by configured checks."
                 ],
                 verification=entry.checks_run,
+                behavior_changes=entry.behavior_changes,
             )
         )
     return summary
@@ -566,6 +665,8 @@ def _analyze_project_for_config(project: Path, config: RefactorRunConfig) -> lis
         include_methods=config.include_methods,
         unit_mode=config.unit_mode,
         unit_sort=config.unit_sort,
+        model=config.model,
+        target_unit_count=config.target_unit_count,
         min_unit_lines=config.min_unit_lines,
         skip_low_value_units=config.skip_low_value_units,
         include_units=config.include_units,
@@ -738,6 +839,9 @@ def _matches_any_unit_pattern(unit: CodeUnit, patterns: list[str]) -> bool:
         unit.name,
         unit.qualified_name,
         unit.location,
+        *unit.member_paths,
+        *unit.owned_paths,
+        *unit.context_paths,
     ]
     return any(
         fnmatch.fnmatchcase(candidate, pattern) for pattern in patterns for candidate in candidates
@@ -1167,6 +1271,7 @@ def _ledger_entry(
     verification: VerificationReport,
     message: str,
     commit: str | None = None,
+    refactor_result: RefactorResult | None = None,
 ) -> LedgerEntry:
     ideas = getattr(retrieval, "ideas", [])
     examples = [idea.code_example[:200] for idea in ideas]
@@ -1179,11 +1284,33 @@ def _ledger_entry(
         unit_id=unit.unit_id,
         outcome=outcome,
         changed_files=changed_files,
+        member_paths=unit.member_paths,
+        owned_paths=unit.owned_paths,
+        context_paths=unit.context_paths,
         examples_used=examples,
         checks_run=verification.descriptions(),
+        renames=refactor_result.renames if refactor_result else [],
+        signature_changes=refactor_result.signature_changes if refactor_result else [],
+        moved_logic=refactor_result.moved_logic if refactor_result else [],
+        integration_points_updated=(
+            refactor_result.integration_points_updated if refactor_result else []
+        ),
+        behavior_changes=refactor_result.behavior_changes if refactor_result else [],
         commit=commit,
         message=message,
     )
+
+
+def _integration_point_paths(unit: CodeUnit, refactor_result: RefactorResult) -> list[str]:
+    paths = set(unit.owned_paths or unit.member_paths or [unit.path])
+    paths.update(update.path for update in refactor_result.integration_points_updated)
+    return sorted(paths)
+
+
+def _ledger_integration_point_paths(path: str, entry: LedgerEntry) -> list[str]:
+    paths = set(entry.owned_paths or entry.member_paths or ([path] if path else []))
+    paths.update(update.path for update in entry.integration_points_updated)
+    return sorted(paths)
 
 
 def _merge_commands(*command_groups: list[str]) -> list[str]:

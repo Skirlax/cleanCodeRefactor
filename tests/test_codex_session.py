@@ -8,12 +8,69 @@ from pathlib import Path
 from pydantic import BaseModel
 
 import ccr.codex.session as session_module
-from ccr.codex.session import CodexCliProvider
+from ccr.codex.session import CodexCliProvider, _unit_json_for_prompt
+from ccr.langfuse_related.prompts import PromptName
+from ccr.schemas.judge import JudgeResult
+from ccr.schemas.refactor import RefactorIntensity, RefactorOutcome, RefactorResult
+from ccr.schemas.retrieval import RetrievalResult
+from ccr.schemas.summary import CumulativeSummary
 from ccr.schemas.tests import TestAssessment as AssessmentSchema
+from ccr.schemas.unit import CodeUnit, UnitKind
 
 
 class CodexResult(BaseModel):
     value: str
+
+
+def _unit(
+    *,
+    member_paths: list[str] | None = None,
+    owned_paths: list[str] | None = None,
+) -> CodeUnit:
+    return CodeUnit(
+        unit_id="sample.py::Widget",
+        kind=UnitKind.CLASS,
+        name="Widget",
+        qualified_name="Widget",
+        path="sample.py",
+        start_line=1,
+        end_line=2,
+        start_byte=0,
+        end_byte=20,
+        text="class Widget:\n    pass\n",
+        sha256="abc",
+        member_paths=member_paths or [],
+        owned_paths=owned_paths or [],
+    )
+
+
+def test_unit_prompt_json_omits_duplicate_member_paths() -> None:
+    unit = _unit(
+        member_paths=["pkg/service.py"],
+        owned_paths=["pkg/service.py"],
+    )
+
+    prompt_json = _unit_json_for_prompt(unit)
+    payload = json.loads(prompt_json)
+
+    assert "member_paths" not in payload
+    assert payload["owned_paths"] == ["pkg/service.py"]
+    assert "Member paths identify" not in prompt_json
+
+
+def test_unit_prompt_json_explains_distinct_member_paths() -> None:
+    unit = _unit(
+        member_paths=["pkg/large.py::Service", "pkg/large.py::helper"],
+        owned_paths=["pkg/large.py"],
+    )
+
+    prompt_json = _unit_json_for_prompt(unit)
+    _, json_text = prompt_json.split("\n", 1)
+    payload = json.loads(json_text)
+
+    assert "Member paths identify the exact source files or source regions" in prompt_json
+    assert payload["member_paths"] == ["pkg/large.py::Service", "pkg/large.py::helper"]
+    assert payload["owned_paths"] == ["pkg/large.py"]
 
 
 def test_run_codex_uses_current_exec_arguments(
@@ -152,6 +209,119 @@ def test_run_codex_logs_call_locally_and_warns_when_langfuse_is_unavailable(
     assert record["command"] == captured["command"]
     assert "Langfuse tracing unavailable" in stderr
     assert str(log_path) in stderr
+
+
+def test_refactor_fetches_langfuse_instructions_for_selected_intensity(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    prompt_requests: list[PromptName] = []
+
+    class FakePromptStore:
+        def get_text(self, name: PromptName) -> str:
+            prompt_requests.append(name)
+            return f"{name.value} text"
+
+    def fake_run_codex(self, *, name, prompt, workspace, schema_model, sandbox):
+        captured["prompt"] = prompt
+        captured["schema_model"] = schema_model
+        captured["sandbox"] = sandbox
+        return schema_model(
+            unit_id="sample.py::Widget",
+            outcome=RefactorOutcome.CHANGED,
+            changed_files=["sample.py"],
+            message="changed",
+        )
+
+    monkeypatch.setattr(CodexCliProvider, "_run_codex", fake_run_codex)
+
+    result = CodexCliProvider(prompt_store=FakePromptStore()).refactor(
+        unit=CodeUnit(
+            unit_id="sample.py::Widget",
+            kind=UnitKind.CLASS,
+            name="Widget",
+            qualified_name="Widget",
+            path="sample.py",
+            start_line=1,
+            end_line=2,
+            start_byte=0,
+            end_byte=20,
+            text="class Widget:\n    pass\n",
+            sha256="abc",
+        ),
+        retrieval=RetrievalResult(unit_id="sample.py::Widget"),
+        summary=CumulativeSummary(),
+        workspace=tmp_path,
+        instructions=None,
+        refactor_intensity=RefactorIntensity.STRUCTURAL,
+    )
+
+    assert result.outcome == RefactorOutcome.CHANGED
+    assert prompt_requests == [
+        PromptName.REFACTOR_INSTRUCTIONS_STRUCTURAL,
+        PromptName.REFACTOR,
+    ]
+    assert captured["sandbox"] == "workspace-write"
+    assert "## Refactor Intensity\n\nstructural" in str(captured["prompt"])
+    assert "ccr-refactor-instructions-structural text" in str(captured["prompt"])
+
+
+def test_judge_prompt_includes_declared_behavior_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakePromptStore:
+        def get_text(self, name: PromptName) -> str:
+            assert name == PromptName.JUDGE
+            return "judge policy text"
+
+    def fake_run_codex(self, *, name, prompt, workspace, schema_model, sandbox):
+        captured["name"] = name
+        captured["prompt"] = prompt
+        captured["schema_model"] = schema_model
+        captured["sandbox"] = sandbox
+        return JudgeResult(unit_id="sample.py::Widget", accepted=True, summary="ok")
+
+    monkeypatch.setattr(CodexCliProvider, "_run_codex", fake_run_codex)
+
+    result = CodexCliProvider(prompt_store=FakePromptStore()).judge(
+        unit=CodeUnit(
+            unit_id="sample.py::Widget",
+            kind=UnitKind.CLASS,
+            name="Widget",
+            qualified_name="Widget",
+            path="sample.py",
+            start_line=1,
+            end_line=2,
+            start_byte=0,
+            end_byte=20,
+            text="class Widget:\n    pass\n",
+            sha256="abc",
+        ),
+        diff="diff --git a/sample.py b/sample.py",
+        refactor_result=RefactorResult(
+            unit_id="sample.py::Widget",
+            outcome=RefactorOutcome.CHANGED,
+            changed_files=["sample.py"],
+            message="changed",
+            behavior_changes=["Fixes legacy empty-input handling."],
+        ),
+        summary=CumulativeSummary(),
+        workspace=tmp_path,
+        refactor_intensity=RefactorIntensity.STRUCTURAL,
+    )
+
+    assert result.accepted
+    assert captured["name"] == "judge"
+    assert captured["schema_model"] is JudgeResult
+    assert captured["sandbox"] == "read-only"
+    prompt = str(captured["prompt"])
+    assert "## Refactor Intensity\n\nstructural" in prompt
+    assert "## Refactor Result" in prompt
+    assert "Fixes legacy empty-input handling." in prompt
 
 
 def _capture_codex_run(

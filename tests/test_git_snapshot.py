@@ -27,10 +27,15 @@ def test_baseline_tracks_ignored_source_and_filters_generated_artifacts(
     ruff_cache = tmp_path / ".ruff_cache" / "0.15.16"
     ruff_cache.mkdir(parents=True)
     (ruff_cache / "16881651732669577055").write_bytes(b"cache")
+    helper = package / "helper.py"
+    helper.write_text("HELPER = 3\n", encoding="utf-8")
 
-    assert repo.changed_files() == ["pkg/game.py"]
+    assert repo.changed_files() == ["pkg/game.py", "pkg/helper.py"]
     diff = repo.diff()
     assert "pkg/game.py" in diff
+    assert "new file mode" in diff
+    assert "pkg/helper.py" in diff
+    assert "+HELPER = 3" in diff
     assert "__pycache__" not in diff
     assert ".ruff_cache" not in diff
 

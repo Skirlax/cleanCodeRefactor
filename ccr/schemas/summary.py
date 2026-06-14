@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from ccr.schemas.refactor import IntegrationUpdate, MovedLogicRecord, RenameRecord
+
 
 class AcceptedRefactor(BaseModel):
     unit: str
     files_changed: list[str] = Field(default_factory=list)
-    renames: list[dict[str, str]] = Field(default_factory=list)
+    renames: list[RenameRecord] = Field(default_factory=list)
     signature_changes: list[str] = Field(default_factory=list)
+    moved_logic: list[MovedLogicRecord] = Field(default_factory=list)
     integration_points: list[str] = Field(default_factory=list)
+    integration_points_updated: list[IntegrationUpdate] = Field(default_factory=list)
     constraints_to_preserve: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
     behavior_changes: list[str] = Field(default_factory=list)
