@@ -1,5 +1,9 @@
 # Clean Code Refactor
 
+![CCR diff viewer showing a Connect4 minimax refactor](docs/assets/minimax-refactor-diff.png)
+
+CCR turns large, risky cleanup work into scoped, verified refactor diffs. This run replaced duplicated Connect4 minimax and alpha-beta recursion with one typed search service while preserving compatibility and passing the generated test suite.
+
 Clean Code Refactor, or CCR, is a command-line tool for running Codex-backed refactors on Python projects without letting the agent edit the original working tree directly.
 
 A run starts by copying the project into an isolated workspace. CCR then selects refactoring units, checks or adds tests, gives Codex a limited scope, verifies the result, commits accepted unit changes in the copy, and writes dashboards and diffs for review. The original repository changes only after you run `ccr apply --yes`.
