@@ -1,6 +1,6 @@
 # Clean Code Refactor
 
-![CCR diff viewer showing a Connect4 minimax refactor](docs/assets/minimax-refactor-diff.png)
+![Connect4 minimax refactor before and after](docs/assets/minimax-refactor-diff.png)
 
 CCR turns large, risky cleanup work into scoped, verified refactor diffs. This run replaced duplicated Connect4 minimax and alpha-beta recursion with one typed search service while preserving compatibility and passing the generated test suite.
 
