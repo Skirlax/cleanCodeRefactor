@@ -13,6 +13,7 @@ from ccr.extraction.token_budget import (
     refresh_model_limits_from_openai_docs,
 )
 from ccr.knowledge.references import DEFAULT_REFERENCES_ROOT, sync_references
+from ccr.langchain_utils.parsers import schema_names
 from ccr.langfuse_related.prompts import (
     DEFAULT_PROMPT_BACKUP_FILE,
     check_required_prompts,
@@ -247,6 +248,45 @@ def build_parser() -> argparse.ArgumentParser:
     langfuse_sync.set_defaults(func=_langfuse_sync_prompts)
     langfuse_check = langfuse_sub.add_parser("check-prompts")
     langfuse_check.set_defaults(func=_langfuse_check_prompts)
+
+    langchain = subparsers.add_parser("langchain")
+    langchain_sub = langchain.add_subparsers(required=True)
+    langchain_export = langchain_sub.add_parser("export-documents")
+    langchain_export.add_argument("project", type=Path)
+    langchain_export.add_argument("--language", default="python")
+    langchain_export.add_argument("--model")
+    langchain_export.add_argument("--include-methods", action="store_true")
+    langchain_export.add_argument(
+        "--unit-mode",
+        choices=["code", "package", "file", "cluster"],
+        default="code",
+    )
+    langchain_export.add_argument("--unit-sort", choices=["value", "source"], default="value")
+    langchain_export.add_argument("--target-unit-count", type=int, default=5)
+    langchain_export.add_argument("--references-root", type=Path, default=DEFAULT_REFERENCES_ROOT)
+    langchain_export.add_argument("--no-references", action="store_true")
+    langchain_export.add_argument(
+        "--output",
+        type=Path,
+        help="Write JSONL documents to this path. The command fails if the path already exists.",
+    )
+    langchain_export.set_defaults(func=_langchain_export_documents)
+
+    langchain_parsers = langchain_sub.add_parser("parser-diagnostics")
+    langchain_parsers.add_argument("--schema", choices=schema_names(), required=True)
+    langchain_parsers.set_defaults(func=_langchain_parser_diagnostics)
+
+    langchain_run = langchain_sub.add_parser("export-run-documents")
+    langchain_run.add_argument("--run", type=Path, required=True)
+    langchain_run.add_argument(
+        "--output-dir",
+        type=Path,
+        help=(
+            "Write additive run-analysis documents to this new directory. If omitted, CCR creates "
+            "a unique directory under <run>/analysis/."
+        ),
+    )
+    langchain_run.set_defaults(func=_langchain_export_run_documents)
 
     prompts = subparsers.add_parser("prompts")
     prompts.set_defaults(func=_prompts_moved)
@@ -502,6 +542,44 @@ def _langfuse_check_prompts(args: argparse.Namespace) -> int:
     statuses = check_required_prompts()
     print(json.dumps(statuses, indent=2))
     return 0 if all(status == "ok" for status in statuses.values()) else 1
+
+
+def _langchain_export_documents(args: argparse.Namespace) -> int:
+    from ccr.langchain_utils.documents import build_project_documents, write_jsonl_documents
+
+    documents = build_project_documents(
+        args.project,
+        language=args.language,
+        include_methods=args.include_methods,
+        unit_mode=args.unit_mode,
+        unit_sort=args.unit_sort,
+        model=args.model,
+        target_unit_count=args.target_unit_count,
+        references_root=args.references_root,
+        include_references=not args.no_references,
+    )
+    if args.output:
+        path = write_jsonl_documents(documents, args.output)
+        print(json.dumps({"documents_path": str(path), "document_count": len(documents)}, indent=2))
+        return 0
+    for document in documents:
+        print(json.dumps(document, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _langchain_parser_diagnostics(args: argparse.Namespace) -> int:
+    from ccr.langchain_utils.parsers import parser_diagnostics
+
+    print(json.dumps(parser_diagnostics(args.schema), indent=2, sort_keys=True))
+    return 0
+
+
+def _langchain_export_run_documents(args: argparse.Namespace) -> int:
+    from ccr.langchain_utils.documents import export_run_documents
+
+    result = export_run_documents(args.run, output_dir=args.output_dir)
+    print(json.dumps(result.as_json(), indent=2, sort_keys=True))
+    return 0
 
 
 def _prompts_moved(args: argparse.Namespace) -> int:

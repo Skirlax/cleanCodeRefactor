@@ -55,6 +55,12 @@ For development, install the extra test and lint tools:
 pip install -e ".[dev]"
 ```
 
+For optional LangChain-compatible export and schema inspection utilities:
+
+```bash
+pip install -e ".[langchain]"
+```
+
 For normal Codex-backed refactoring, make sure the `codex` CLI is installed and available on `PATH`.
 
 ### Install Langfuse Locally
@@ -186,6 +192,24 @@ Analyze a project and print extracted units as JSON:
 
 ```bash
 ccr analyze /path/to/project --unit-mode code
+```
+
+Export extracted units and reference docs as LangChain-style JSONL documents:
+
+```bash
+ccr langchain export-documents /path/to/project --output /tmp/ccr-documents.jsonl
+```
+
+Inspect the LangChain parser format instructions generated for a CCR schema:
+
+```bash
+ccr langchain parser-diagnostics --schema refactor
+```
+
+Create an additive LangChain-style document export for a completed run:
+
+```bash
+ccr langchain export-run-documents --run /tmp/ccr/runs/run-YYYYMMDDTHHMMSSZ
 ```
 
 Print the exact units that would be selected by a refactor command, without creating a run:

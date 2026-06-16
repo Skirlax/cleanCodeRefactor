@@ -27,6 +27,9 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.6",
 ]
+langchain = [
+  "langchain-core>=0.3,<2",
+]
 
 [project.scripts]
 ccr = "ccr.cli:main"
