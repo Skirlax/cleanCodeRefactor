@@ -7,6 +7,7 @@ import hashlib
 import html
 import json
 import re
+import shlex
 import subprocess
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -327,11 +328,28 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
       font-size: 12px;
       line-height: 1.45;
     }}
+    .json-object, .json-array, .json-value {{
+      min-width: 0;
+    }}
     .json-pair, .json-item {{
       display: grid;
       grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
       gap: 8px;
       align-items: start;
+    }}
+    .json-composite-pair, .json-composite-item {{
+      display: block;
+    }}
+    .json-composite-pair > .json-key,
+    .json-composite-item > .json-index {{
+      display: block;
+      margin-bottom: 3px;
+    }}
+    .json-composite-pair > .json-value,
+    .json-composite-item > .json-value {{
+      display: block;
+      padding-left: 14px;
+      border-left: 1px solid #334155;
     }}
     .json-key {{ color: #93c5fd; overflow-wrap: anywhere; }}
     .json-index {{ color: #c4b5fd; }}
@@ -343,6 +361,27 @@ def _render_dashboard(snapshot: dict[str, Any]) -> str:
     .json-tree .code-block {{
       margin-top: 2px;
       padding: 9px;
+    }}
+    .verification-failure {{
+      margin-top: 8px;
+    }}
+    .failure-command {{
+      margin-top: 4px;
+    }}
+    .failure-output {{
+      max-height: 360px;
+      margin-top: 8px;
+      padding: 9px;
+      border: 1px solid #263449;
+      border-radius: 6px;
+      background: #111827;
+      color: #e5e7eb;
+      white-space: pre-wrap;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
     }}
     .empty {{
       color: var(--muted);
@@ -1555,7 +1594,61 @@ def _compact_payload(payload: dict[str, Any]) -> str:
         parts.append(
             f'<div class="muted">Changed: {_list_text_html(changed, css_class="path-value")}</div>'
         )
+    failure = _verification_failure_payload(payload.get("verification"))
+    if failure:
+        parts.append(failure)
     return "".join(parts)
+
+
+def _verification_failure_payload(verification: Any) -> str:
+    if not isinstance(verification, dict):
+        return ""
+    failed = [
+        result
+        for result in verification.get("results") or []
+        if isinstance(result, dict) and result.get("returncode") not in {0, None}
+    ]
+    if not failed:
+        return ""
+    result = failed[0]
+    command = _format_command(result.get("command"))
+    output = _verification_output(result)
+    output_html = (
+        f'<pre class="failure-output"><code>{_h(_tail(output, 4_000))}</code></pre>'
+        if output
+        else ""
+    )
+    return (
+        '<div class="verification-failure">'
+        '<div class="muted">Failed command</div>'
+        f'<div class="failure-command command-value">{_h(command)}</div>'
+        f"{output_html}"
+        "</div>"
+    )
+
+
+def _verification_output(result: dict[str, Any]) -> str:
+    stderr = str(result.get("stderr") or "").strip()
+    stdout = str(result.get("stdout") or "").strip()
+    if stdout and _is_wrapper_error(stderr):
+        return stdout
+    return stderr or stdout
+
+
+def _is_wrapper_error(stderr: str) -> bool:
+    return "See above for error" in stderr
+
+
+def _format_command(command: Any) -> str:
+    if isinstance(command, list):
+        return shlex.join(str(part) for part in command)
+    return str(command or "")
+
+
+def _tail(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    return "... truncated ...\n" + value[-max_chars:]
 
 
 def _json_details(label: str, value: Any) -> str:
@@ -1720,8 +1813,13 @@ def _json_value_html(value: Any) -> str:
             return '<span class="json-empty">{}</span>'
         rows = []
         for key, item in value.items():
+            row_class = (
+                "json-pair json-composite-pair"
+                if isinstance(item, dict | list)
+                else "json-pair"
+            )
             rows.append(
-                '<div class="json-pair">'
+                f'<div class="{row_class}">'
                 f'<span class="json-key">{_h(json.dumps(str(key), ensure_ascii=False))}</span>'
                 f'<div class="json-value">{_json_value_html(item)}</div>'
                 "</div>"
@@ -1732,8 +1830,13 @@ def _json_value_html(value: Any) -> str:
             return '<span class="json-empty">[]</span>'
         rows = []
         for index, item in enumerate(value):
+            row_class = (
+                "json-item json-composite-item"
+                if isinstance(item, dict | list)
+                else "json-item"
+            )
             rows.append(
-                '<div class="json-item">'
+                f'<div class="{row_class}">'
                 f'<span class="json-index">[{index}]</span>'
                 f'<div class="json-value">{_json_value_html(item)}</div>'
                 "</div>"

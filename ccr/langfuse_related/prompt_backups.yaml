@@ -188,5 +188,12 @@ prompts:
       Preserve current behavior exactly, including surprising legacy behavior when it is observable.
       Update or add verification commands only when needed for the new tests to run.
 
+      Keep generated tests deterministic and hardware-neutral. Do not make tests depend on CUDA,
+      GPUs, network access, wall-clock timing, display servers, or other optional local resources
+      unless the production behavior being characterized explicitly requires that resource. For
+      tensor/device-sensitive code, keep models and tensors on the same explicit device or
+      monkeypatch availability checks so the test behaves the same on CPU-only and CUDA-enabled
+      machines.
+
       Do not refactor production code in this step. Return only data matching the requested output
       schema, including changed test files, test commands, message, and assumptions.

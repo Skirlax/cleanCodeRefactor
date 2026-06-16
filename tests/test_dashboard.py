@@ -110,6 +110,62 @@ def test_dashboard_renders_run_artifacts(tmp_path: Path) -> None:
     assert "No accepted unit commits are available yet." in diff_html
 
 
+def test_dashboard_surfaces_verification_failure_output(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-failed-tests"
+    run_dir.mkdir()
+    event_log = RunEventLog(run_dir / "events.jsonl")
+    event_log.append(
+        "test_generation_verification_failed",
+        unit_id="cluster/04-zero-alpha-checkpoint::cluster",
+        message=(
+            "ERROR conda.cli.main_run:execute(124): "
+            "`conda run python -m pytest tests` failed. (See above for error)"
+        ),
+        verification={
+            "results": [
+                {
+                    "command": ["/venv/bin/python", "-m", "compileall", "-q", "."],
+                    "returncode": 0,
+                    "stdout": "",
+                    "stderr": "",
+                },
+                {
+                    "command": [
+                        "/home/user/miniconda3/condabin/conda",
+                        "run",
+                        "-n",
+                        "ai_stuff",
+                        "python",
+                        "-m",
+                        "pytest",
+                        "tests",
+                    ],
+                    "returncode": 1,
+                    "stdout": (
+                        "FAILED tests/test_alpha_zero_network.py::"
+                        "test_original_alphazero_network_contracts_and_loss\n"
+                        "RuntimeError: Input type (torch.cuda.FloatTensor) and weight type "
+                        "(torch.FloatTensor) should be the same"
+                    ),
+                    "stderr": (
+                        "ERROR conda.cli.main_run:execute(124): "
+                        "`conda run python -m pytest tests` failed. (See above for error)\n"
+                    ),
+                },
+            ]
+        },
+    )
+
+    dashboard = write_run_dashboard(run_dir)
+
+    html = dashboard.read_text(encoding="utf-8")
+    assert "Failed command" in html
+    assert "/home/user/miniconda3/condabin/conda run -n ai_stuff python -m pytest tests" in html
+    assert "test_original_alphazero_network_contracts_and_loss" in html
+    assert "torch.cuda.FloatTensor" in html
+    assert "json-composite-pair" in html
+
+
 def test_elapsed_snapshot_stops_when_run_is_interrupted() -> None:
     elapsed = _elapsed_snapshot(
         [

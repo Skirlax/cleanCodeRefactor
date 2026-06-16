@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from ccr.verification.runner import CommandResult, VerificationReport
 from ccr.workflow import run as workflow_run
 
 
@@ -42,3 +43,23 @@ def test_format_workspace_formats_only_changed_python_files(
     command = captured["command"]
     assert command[-1] == "pkg/changed.py"
     assert "." not in command
+
+
+def test_verification_failure_message_prefers_stdout_for_wrapper_errors() -> None:
+    report = VerificationReport(
+        results=[
+            CommandResult(
+                command=["conda", "run", "python", "-m", "pytest", "tests"],
+                returncode=1,
+                stdout="FAILED tests/test_network.py::test_loss\nRuntimeError: device mismatch",
+                stderr=(
+                    "ERROR conda.cli.main_run:execute(124): "
+                    "`conda run python -m pytest tests` failed. (See above for error)\n"
+                ),
+            )
+        ]
+    )
+
+    assert workflow_run._verification_failure_message(report) == (
+        "FAILED tests/test_network.py::test_loss\nRuntimeError: device mismatch"
+    )

@@ -1327,8 +1327,20 @@ def _verification_failure_message(report: VerificationReport) -> str:
     if not failed:
         return "Verification failed."
     result = failed[0]
-    output = (result.stderr or result.stdout).strip()
+    output = _verification_failure_output(result)
     return output[-2_000:] if output else result.describe()
+
+
+def _verification_failure_output(result: CommandResult) -> str:
+    stderr = result.stderr.strip()
+    stdout = result.stdout.strip()
+    if stdout and _is_wrapper_error(stderr):
+        return stdout
+    return stderr or stdout
+
+
+def _is_wrapper_error(stderr: str) -> bool:
+    return "See above for error" in stderr
 
 
 def _build_run_summary(
